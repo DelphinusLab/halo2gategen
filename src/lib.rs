@@ -1,13 +1,36 @@
 #[macro_export]
+macro_rules! constant_from {
+    ($x: expr) => {
+        halo2_proofs::plonk::Expression::Constant(F::from($x as u64))
+    };
+}
+
+#[macro_export]
+macro_rules! constant_from_bn {
+    ($x: expr) => {
+        halo2_proofs::plonk::Expression::Constant(bn_to_field($x))
+    };
+}
+
+#[macro_export]
+macro_rules! constant {
+    ($x: expr) => {
+        halo2_proofs::plonk::Expression::Constant($x)
+    };
+}
+
+#[macro_export]
+macro_rules! value_for_assign {
+    ($x: expr) => {
+        halo2_proofs::circuit::Value::known($x)
+    };
+}
+
+#[macro_export]
 macro_rules! item_count {
     () => {0usize};
     ($cut:tt nil $($tail:tt)*) => {1usize + item_count!($($tail)*)};
     ($cut:tt $name:tt $($tail:tt)*) => {1usize + item_count!($($tail)*)};
-}
-
-pub struct GateCell {
-    pub cell: [usize;3],
-    pub name: String,
 }
 
 #[macro_export]
@@ -17,7 +40,7 @@ macro_rules! table_item {
         table_item!($row, $col, $($tail)*);
     };
     ($row:expr, $col:expr, | $name:tt $($tail:tt)*) => {
-        fn $name() -> GateCell {
+        pub fn $name() -> GateCell {
             let index = $row * $col - 1usize - (item_count!($($tail)*));
             GateCell {
                 cell: [Self::typ(index), Self::col(index), Self::row(index)],
@@ -26,6 +49,11 @@ macro_rules! table_item {
         }
         table_item!($row, $col, $($tail)*);
     };
+}
+
+pub struct GateCell {
+    pub cell: [usize;3],
+    pub name: String,
 }
 
 
@@ -41,7 +69,7 @@ macro_rules! customized_circuits_expand {
         }
 
         impl $name {
-            fn get_expr<F:FieldExt>(&self, meta: &mut VirtualCells<F>, gate_cell: GateCell) -> Expression<F> {
+            pub fn get_expr<F:FieldExt>(&self, meta: &mut VirtualCells<F>, gate_cell: GateCell) -> Expression<F> {
                 let cell = gate_cell.cell;
                 //println!("Assign Cell at {} {} {:?}", start_offset, gate_cell.name, value);
                 if cell[0] == 0 { // advice
@@ -53,7 +81,49 @@ macro_rules! customized_circuits_expand {
                 }
             }
 
-            fn assign_cell<F:FieldExt>(
+            pub fn get_expr_with_offset<F:FieldExt>(&self, meta: &mut VirtualCells<F>, gate_cell: GateCell, offset: usize) -> Expression<F> {
+                let cell = gate_cell.cell;
+                //println!("Assign Cell at {} {} {:?}", start_offset, gate_cell.name, value);
+                if cell[0] == 0 { // advice
+                    meta.query_advice(self.witness[cell[1]], Rotation((cell[2] + offset) as i32))
+                } else if cell[0] == 1 { // fix
+                    meta.query_fixed(self.fixed[cell[1]], Rotation((cell[2] + offset) as i32))
+                } else { // selector
+                    meta.query_selector(self.selector[cell[1]])
+                }
+            }
+
+            pub fn get_advice_column(&self, gate_cell: GateCell) -> Column<Advice> {
+                let cell = gate_cell.cell;
+                //println!("Assign Cell at {} {} {:?}", start_offset, gate_cell.name, value);
+                if cell[0] == 0 { // advice
+                    self.witness[cell[1]]
+                } else {
+                    unreachable!();
+                }
+            }
+
+            pub fn get_fixed_column(&self, gate_cell: GateCell) -> Column<Fixed> {
+                let cell = gate_cell.cell;
+                //println!("Assign Cell at {} {} {:?}", start_offset, gate_cell.name, value);
+                if cell[0] == 1 { // advice
+                    self.fixed[cell[1]]
+                } else {
+                    unreachable!();
+                }
+            }
+
+            pub fn get_selector_column(&self, gate_cell: GateCell) -> Selector {
+                let cell = gate_cell.cell;
+                //println!("Assign Cell at {} {} {:?}", start_offset, gate_cell.name, value);
+                if cell[0] == 2 { // advice
+                    self.selector[cell[1]]
+                } else {
+                    unreachable!();
+                }
+            }
+
+            pub fn assign_cell<F:FieldExt>(
                 &self,
                 region: &mut Region<F>,
                 start_offset: usize,
@@ -67,25 +137,25 @@ macro_rules! customized_circuits_expand {
                         || format!("assign cell"),
                         self.witness[cell[1]],
                         start_offset + cell[2],
-                        || Value::known(value)
+                        || value_for_assign!(value)
                     )
                 } else if cell[0] == 1 { // fix
                     region.assign_fixed(
                         || format!("assign cell"),
                         self.fixed[cell[1]],
                         start_offset + cell[2],
-                        || Value::known(value)
+                        || value_for_assign!(value)
                     )
                 } else { // selector
                     unreachable!()
                 }
             }
 
-            fn enable_selector<F:FieldExt>(
+            pub fn enable_selector<F:FieldExt>(
                 &self,
                 region: &mut Region<F>,
                 start_offset: usize,
-                gate_cell: GateCell,
+                gate_cell: &GateCell,
             ) -> Result<(), Error> {
                 assert!(gate_cell.cell[0] == 2);
                 self.selector[gate_cell.cell[1]].enable(region, start_offset + gate_cell.cell[2])
@@ -149,7 +219,6 @@ mod tests {
         Selector, Expression, VirtualCells,
         Error,
     };
-    use halo2_proofs::circuit::Value;
     use halo2_proofs::poly::Rotation;
     use halo2_proofs::circuit::{Region, AssignedCell};
 
