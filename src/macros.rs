@@ -230,9 +230,8 @@ mod tests {
     use crate::customized_circuits_expand;
     use crate::table_item;
     use crate::item_count;
-    use crate::utils::GateCell;
-    use crate::utils::Limb;
-    use halo2_proofs::arithmetic::FieldExt;
+    use crate::GateCell;
+    use crate::Limb;
     use halo2_proofs::plonk::{
         Fixed, Column, Advice,
         Selector, Expression, VirtualCells,
